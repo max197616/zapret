@@ -865,19 +865,21 @@ sub processNew {
 				{
 #					print "New ip: ".$ip."\n";
 					my $ipa = new Net::IP($ip);
-					my $ip_packed=pack("B*",$ipa->binip());
-					$sth = $DBH->prepare("INSERT INTO zap2_ips(record_id, ip, resolved) VALUES(?,?,0)");
-					$sth->bind_param(1, $record_id);
-					$sth->bind_param(2, $ip_packed);
-					$sth->execute;
-					$ZAP_OLD_IPS{$record_id}{$ipa->ip()} = 1;
-					$MAIL_ADDED_IPS .= "Added new IP: ".$ipa->ip()." for id $record_id\n";
-					$logger->debug("New ip: ".$ipa->ip());
-					if($ipa->version() == 4)
-					{
-						$added_ipv4_ips++;
-					} else {
-						$added_ipv6_ips++;
+					if (defined($ipa)) {
+						my $ip_packed=pack("B*",$ipa->binip());
+						$sth = $DBH->prepare("INSERT INTO zap2_ips(record_id, ip, resolved) VALUES(?,?,0)");
+						$sth->bind_param(1, $record_id);
+						$sth->bind_param(2, $ip_packed);
+						$sth->execute;
+						$ZAP_OLD_IPS{$record_id}{$ipa->ip()} = 1;
+						$MAIL_ADDED_IPS .= "Added new IP: ".$ipa->ip()." for id $record_id\n";
+						$logger->debug("New ip: ".$ipa->ip());
+						if($ipa->version() == 4)
+						{
+							$added_ipv4_ips++;
+						} else {
+							$added_ipv6_ips++;
+						}
 					}
 				} else {
 					delete $ZAP_OLD_TRUE_IPS{$record_id}{$ip};
