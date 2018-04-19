@@ -11,7 +11,7 @@ use DBI;
 use Data::Dumper;
 use MIME::Base64;
 use utf8;
-use XML::Simple;
+use XML::Simple qw(:strict);
 use URI 1.69;
 use NetAddr::IP;
 use Digest::MD5 qw(md5_hex);
@@ -27,6 +27,9 @@ use AnyEvent::DNS;
 use Log::Log4perl;
 use Getopt::Long;
 use URI::UTF8::Punycode;
+use File::Path qw(make_path);
+use File::Copy;
+use Email::MIME;
 
 $XML::Simple::PREFERRED_PARSER = 'XML::Parser';
 
@@ -62,6 +65,7 @@ my $sig_file = $Config->{'PATH.sig_file'} || die "PATH.sig_file not defined.";
 $sig_file = $dir."/".$sig_file;
 my $template_file = $Config->{'PATH.template_file'} || die "PATH.template_file not defined.";
 $template_file = $dir."/".$template_file;
+my $archive_path = $Config->{'PATH.archive'} || "";
 
 my $db_host = $Config->{'DB.host'} || die "DB.host not defined.";
 my $db_user = $Config->{'DB.user'} || die "DB.user not defined.";
@@ -103,7 +107,15 @@ $dns_timeout = int($dns_timeout) if($dns_timeout);
 
 
 my $mail_send = $Config->{'MAIL.send'} || 0;
-my @mail_to = $Config->{'MAIL.to'} || die "MAIL.to not defined.";
+
+my $mails_to = $Config->{'MAIL.to'} || die "MAIL.to not defined.";
+my @mail_to;
+if(ref($mails_to) ne "ARRAY")
+{
+	push(@mail_to, $mails_to);
+} else {
+	@mail_to = @{$mails_to};
+}
 my $smtp_auth = $Config->{'MAIL.auth'} || 0;
 my $smtp_from = $Config->{'MAIL.from'} || die "MAIL.from not defined.";
 my $smtp_host = $Config->{'MAIL.server'} || die "MAIL.server not defined.";
@@ -194,6 +206,7 @@ if( $lastResult eq 'send' )
 		$logger->info("Reestr not yet ready. Waiting...");
 		sleep(10);
 	}
+	$logger->info("Stopping RKN at ".(localtime()));
 	exit 0;
 }
 
@@ -207,6 +220,8 @@ if(checkDumpDate())
 		sleep(5);
 	}
 }
+
+$logger->info("Stopping RKN at ".(localtime()));
 
 exit 0;
 
@@ -249,29 +264,40 @@ sub getResult
 		}
 	} else {
 		unlink $dir.'/dump.xml';
-		unlink $dir.'/arch.zip';
 		unlink $dir.'/dump.xml.sig';
 		my $zip = decode_base64($result[1]);
 
-		open F, '>'.$dir.'/arch.zip' || die "Can't open arch.zip for writing!\n".$! ;
+		my $file = "arch.zip";
+		my $tm=time();
+		if($archive_path)
+		{
+			$file = strftime "arch-%Y-%m-%d-%H_%M_%S.zip", localtime($tm);
+		}
+
+		open F, '>'.$dir."/".$file || die "Can't open $dir/$file for writing!\n".$! ;
 		binmode F;
 		print F $zip;
 		close F;
-	
-		`unzip -o $dir/arch.zip -d $dir/`;
+		`unzip -o $dir/$file -d $dir/`;
+		if($archive_path)
+		{
+			my $apath = strftime "$archive_path/%Y/%Y-%m/%Y-%m-%d", localtime($tm);
+			make_path($apath);
+			copy($dir."/".$file,$apath."/".$file);
+			unlink $dir."/".$file;
+		}
+
 		$logger->debug("Got result, parsing dump.");
 
 		set('lasltAction', 'getResult');
 		set('lastResult', 'got');
 		set('lastDumpDate', time);
 
-		parseDump();
+		parseDump($dir.'/dump.xml');
 		# статистика
 		$logger->info("Load iterations: ".$ldd_iterations.", resolved domains ipv4: ".$resolved_domains_ipv4.", resolved domains ipv6: ".$resolved_domains_ipv6);
 		$logger->info("Added: domains: ".$added_domains.", urls: ".$added_urls.", IPv4 ips: ".$added_ipv4_ips.", IPv6 ips: ".$added_ipv6_ips.", subnets: ".$added_subnets.", records: ".$added_records);
 		$logger->info("Deleted: old domains: ".$deleted_old_domains.", old urls: ".$deleted_old_urls.", old ips: ".$deleted_old_ips.", old only ips: ".$deleted_old_only_ips.", old subnets: ".$deleted_old_subnets.", old records: ".$deleted_old_records);
-		my $stop_time=localtime();
-		$logger->info("Stopping RKN at ".$stop_time);
 	}
 	return 0;
 }
@@ -433,114 +459,161 @@ sub getParams
 	}
 }
 
+sub parseContent
+{
+	my $content = shift;
+	my ( $decision_number, $decision_org, $decision_date, $entry_type, $include_time, $block_type );
+	$decision_number = $decision_org = $decision_date = $entry_type = '';
+	my $decision_id = $content->{id};
+	$entry_type = '';
+
+	$decision_number = $content->{decision}->{number} if defined( $content->{decision}->{number} );
+	$decision_org = $content->{decision}->{org} if defined( $content->{decision}->{org} );
+	$decision_date = $content->{decision}->{date} if defined( $content->{decision}->{org} );
+	$entry_type = $content->{entryType} if defined( $content->{entryType} );
+	$include_time = $content->{includeTime} if defined( $content->{includeTime} );
+
+	$block_type = $content->{blockType} if(defined($content->{blockType}));
+
+	my %item = (
+		'entry_type'	=> $entry_type,
+		'decision_num'	=> $decision_number,
+		'decision_id'	=> $decision_id,
+		'decision_date'	=> $decision_date,
+		'decision_org'	=> $decision_org,
+		'include_time'	=> $include_time,
+		'block_type'	=> $block_type
+	);
+
+	my @domains = ();
+	my @urls = ();
+	my @ips = ();
+	my @subnets = ();
+	my $blockType=defined($content->{blockType}) ? $content->{blockType} : "default";
+	# Domains
+	if( defined( $content->{domain} ) )
+	{
+		if(ref($content->{domain}) eq 'ARRAY')
+		{
+			foreach my $domain (@{$content->{domain}})
+			{
+				if(ref($domain) eq 'HASH')
+				{
+					push @domains, $domain->{content};
+				} else {
+					push @domains, $domain;
+				}
+			}
+		} elsif (ref($content->{domain}) eq 'HASH')
+		{
+			push @domains, $content->{domain}->{content};
+		} else {
+			push @domains, $content->{domain};
+		}
+	}
+	$item{'domains'} = \@domains;
+
+	# URLs
+	if( defined( $content->{url} ) )
+	{
+		if( ref($content->{url}) eq 'ARRAY' )
+		{
+			foreach my $url (@{$content->{url}})
+			{
+				if(ref($url) eq 'HASH')
+				{
+					push @urls, $url->{content};
+				} else {
+					push @urls, $url;
+				}
+			}
+		} elsif (ref($content->{url}) eq 'HASH')
+		{
+			push @urls, $content->{url}->{content};
+		} else {
+			push @urls, $content->{url};
+		}
+	}
+	$item{'urls'} = \@urls;
+
+	# IPs
+	if( defined( $content->{ip} ) )
+	{
+		if( ref($content->{ip}) eq 'ARRAY' )
+		{
+			foreach my $ip (@{$content->{ip}})
+			{
+				if(ref($ip) eq 'HASH')
+				{
+					push @ips, $ip->{content};
+				} else {
+					push @ips, $ip;
+				}
+			}
+		} elsif(ref($content->{ip}) eq 'HASH')
+		{
+			push @ips, $content->{ip}->{content};
+		} else {
+			push @ips, $content->{ip};
+		}
+	}
+	$item{'ips'} = \@ips;
+
+	# Subnets
+	if( defined( $content->{ipSubnet} ) )
+	{
+		if( ref($content->{ipSubnet}) eq 'ARRAY' )
+		{
+			foreach my $subnet ( @{$content->{ipSubnet}} )
+			{
+				if(ref($subnet) eq 'HASH')
+				{
+					push @subnets, $subnet->{content};
+				} else {
+					push @subnets, $subnet;
+				}
+			}
+		} elsif (ref($content->{ipSubnet}) eq 'HASH')
+		{
+			push @subnets, $content->{ipSubnet}->{content};
+		} else {
+			push @subnets, $content->{ipSubnet};
+		}
+	}
+	$item{'subnets'} = \@subnets;
+
+	$NEW{$decision_id} = \%item;
+}
 
 sub parseDump
 {
-	$logger->debug("Parsing dump...");
+	my $xml_file = shift;
+	$logger->debug("Parsing dump from file '$xml_file'...");
 
 	my $xml = new XML::Simple;
-	my $data = $xml->XMLin($dir.'/dump.xml');
-	foreach my $k (keys %{$data->{content}})
+	my $data = $xml->XMLin($xml_file, ForceArray=> 0, KeyAttr => {});
+
+	if($data->{formatVersion} ne $RKN_DUMP_VERSION)
 	{
-		eval {
-			my ( $decision_number, $decision_org, $decision_date, $entry_type, $include_time );
-			$decision_number = $decision_org = $decision_date = $entry_type = '';
-			my $decision_id = $k;
-			$entry_type = '';
-			my $content = $data->{content}->{$k};
-			$decision_number = $content->{decision}->{number} if defined( $content->{decision}->{number} );
-			$decision_org = $content->{decision}->{org} if defined( $content->{decision}->{org} );
-			$decision_date = $content->{decision}->{date} if defined( $content->{decision}->{org} );
-			$entry_type = $content->{entryType} if defined( $content->{entryType} );
-			$include_time = $content->{includeTime} if defined( $content->{includeTime} );
-	
-			my %item = (
-				'entry_type'	=> $entry_type,
-				'decision_num'	=> $decision_number,
-				'decision_id'	=> $decision_id,
-				'decision_date'	=> $decision_date,
-				'decision_org'	=> $decision_org,
-				'include_time'	=> $include_time
-			);
-
-			my @domains = ();
-			my @urls = ();
-			my @ips = ();
-			my @subnets = ();
-			my $blockType=defined($content->{blockType}) ? $content->{blockType} : "default";
-
-#			if($blockType ne "domain" && $blockType ne "default")
-#			{
-#				$logger->error("Not recognized blockType: $blockType");
-#			}
-			#пишем домены, если только стоит тип блокировки по домену
-			# Domains
-			if( defined( $content->{domain} ) )
-			{
-				if(ref($content->{domain}) eq 'ARRAY')
-				{
-					foreach( @{$content->{domain}} )
-					{
-						push @domains, $_;
-					}
-			} else {
-				push @domains, $content->{domain};
-			}
-			}
-			$item{'domains'} = \@domains;
-
-			# URLs
-			if( defined( $content->{url} ) )
-			{
-				if( ref($content->{url}) eq 'ARRAY' )
-				{
-					foreach( @{$content->{url}} )
-					{
-						push @urls, $_;
-					}
-				} else {
-					push @urls, $content->{url};
-				}
-			}
-			$item{'urls'} = \@urls;
-		
-			# IPs
-			if( defined( $content->{ip} ) )
-			{
-				if( ref($content->{ip}) eq 'ARRAY' )
-				{
-					foreach( @{$content->{ip}} )
-					{
-						push @ips, $_;
-					}
-				} else {
-					push @ips, $content->{ip};
-				}
-			}
-			$item{'ips'} = \@ips;
-		
-			# Subnets
-			if( defined( $content->{ipSubnet} ) )
-			{
-				if( ref($content->{ipSubnet}) eq 'ARRAY' )
-				{
-					foreach( @{$content->{ipSubnet}} )
-					{
-						push @subnets, $_;
-					}
-				} else {
-					push @subnets, $content->{ipSubnet};
-				}
-			}
-			$item{'subnets'} = \@subnets;
-	
-#			$logger->debug( " -- Decision (id ".$decision_id."): ".$decision_number.", from ".$decision_date.", org: ".$decision_org." \n" );
-	
-			$NEW{$decision_id} = \%item;
-		};
-		$logger->error("Eval! ".$@) if $@;
+		$logger->error("Incompatible dump version $data->{formatVersion}. Exiting");
+		Mail("Incompatible dump version $data->{formatVersion}", "zapret alert!");
+		exit 1;
 	}
-	
+	my $ref_type = ref($data->{content});
+	eval {
+		if($ref_type eq 'ARRAY')
+		{
+			foreach my $arr (@{$data->{content}})
+			{
+				parseContent($arr);
+			}
+		} elsif ($ref_type eq 'HASH')
+		{
+			parseContent($data->{content});
+		}
+	};
+	$logger->error("Eval error: ".$@) if $@;
+
 	# Dump parsed.
 	# Get old data from DB
 	getOld();
@@ -652,7 +725,7 @@ sub processNew {
 				my $scheme = $uri->scheme();
 				if($scheme ne "http" && $scheme ne "https")
 				{
-					$logger->error("Unsupported scheme in url: $url for resolving.");
+					$logger->warn("Unsupported scheme in the url: $url");
 				} else {
 					my $url_domain = $uri->host();
 					#my @res = ( $url =~ m!^(?:http://|https://)?([^(/|\?)]+)!i );
@@ -663,7 +736,7 @@ sub processNew {
 						$MAIL_EXCLUDES .= "Excluding URL (caused by excluded domain ".$url_domain."): ".$url."\n";
 						next;
 					}
-					Resolve( $url_domain, $record_id, $resolver, $cv);
+					Resolve( $url_domain, $record_id, $resolver, $cv) if($resolve == 1);
 				}
 				
 				
@@ -706,11 +779,14 @@ sub processNew {
 					next;
 				}
 				$processed_domains++;
-				if($domain =~ /^\*\./)
+				if($resolve == 1)
 				{
-					$logger->info("Skip to resolve domain '$domain' because it masked");
-				} else {
-					Resolve( $domain, $record_id, $resolver, $cv );
+					if($domain =~ /^\*\./)
+					{
+						$logger->info("Skip to resolve domain '$domain' because it masked");
+					} else {
+						Resolve( $domain, $record_id, $resolver, $cv );
+					}
 				}
 				if( !defined( $OLD_DOMAINS{md5_hex(encode_utf8($domain))} ) )
 				{
@@ -833,7 +909,7 @@ sub processNew {
 				for my $net (keys %EX_SUBNETS)
 				{
 					my $net1 = NetAddr::IP->new( $net );
-					my $net2 = NetAddr::IP->new( $net );
+					my $net2 = NetAddr::IP->new( $subnet );
 					if( $net1 && $net2 ) {
 						if( $net1->within( $net2 ) || $net2->within( $net1 ) ) {
 #							print "Exclude subnet ".$subnet.": overlaps with excluded net ".$net."\n";
@@ -1073,52 +1149,48 @@ sub Resolve
 	resolve_async($cv,$domain,$resolvera,$record_id);
 }
 
-sub Mail {
+sub Mail
+{
 	my $text = shift;
-	
-	setlocale(LC_TIME, "POSIX");
-	
-	foreach (@mail_to ) {
-	
-	    my $now = time();
-	    my $timezone = strftime("%z", localtime($now));
-	    my $datestring = strftime("Date: %a, %d %b %Y %H:%M:%S %z", localtime($now));
-	
-	    eval {
-		my $to = $_;
-		
-		my $smtp = Net::SMTP->new($smtp_host.':'.$smtp_port, Debug => 0) or do { $logger->error( "Can't connect to SMTP server; $!;"); return; };
-	
+	my $subj = shift || "zapret update!";
+	foreach (@mail_to)
+	{
 		eval {
-		    require MIME::Base64;
-		    require Authen::SASL;
-		} or do { $logger->error( "Need MIME::Base64 and Authen::SASL to do smtp auth."); return; };
-		
-		
-		if( $smtp_auth eq '1' ) {
-		    if( $smtp_login eq '' || $smtp_password eq '' ) {
-			$logger->debug("ERROR! SMTP Auth is enabled, but no login and password defined!");
-			return;
-		    }
-		    $smtp->auth($smtp_login, $smtp_password) or do {$logger->error( "Can't auth on smtp server; $!"); return; };
-		}
+			my $to = $_;
+			my $smtp = Net::SMTP->new($smtp_host.':'.$smtp_port, Debug => 0) or do { $logger->error( "Can't connect to the SMTP server: $!"); return; };
 	
-		$smtp->mail( $smtp_from );
-		$smtp->recipient( $to );
-	
-		$smtp->data();
-		$smtp->datasend("$datestring\n");
-		$smtp->datasend("From: $smtp_from");
-		$smtp->datasend("\n");
-		$smtp->datasend("To: ".$to."\n");
-		$smtp->datasend("Subject: zapret update!");
-		$smtp->datasend("\n");
-		$smtp->datasend("Content-type: text/plain; charset=utf-8\n");
-		$smtp->datasend( $text );
-		$smtp->dataend();
-		$smtp->quit;
-	    };
-	    $logger->error( $@ ) if $@;
+			eval {
+			    require MIME::Base64;
+			    require Authen::SASL;
+			} or do { $logger->error( "Need MIME::Base64 and Authen::SASL to do smtp auth."); return; };
+			
+			
+			if( $smtp_auth eq '1' )
+			{
+				if( $smtp_login eq '' || $smtp_password eq '' )
+				{
+					$logger->debug("ERROR! SMTP Auth is enabled, but no login and password defined!");
+					return;
+				}
+				$smtp->auth($smtp_login, $smtp_password) or do {$logger->error( "Can't auth on smtp server: $!"); return; };
+			}
+			$smtp->mail( $smtp_from );
+			$smtp->recipient( $to );
+			my $email = Email::MIME->create(
+				header_str => [ From => $smtp_from, To => $to, Subject => $subj],
+				attributes => {
+					content_type => "text/plain",
+					charset      => "UTF-8",
+					encoding     => "quoted-printable"
+				},
+				body_str => $text
+			);
+			$smtp->data();
+			$smtp->datasend($email->as_string());
+			$smtp->dataend();
+			$smtp->quit;
+		};
+		$logger->error("Email send error: $@") if $@;
 	}
 }
 

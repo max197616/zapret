@@ -3,13 +3,14 @@ package Zapret;
 require Exporter;
 
 @ISA = qw/Exporter/;
-@EXPORT = qw//;
+@EXPORT = qw/$RKN_DUMP_VERSION/;
 
 use utf8;
 use strict;
 use SOAP::Lite;
 use MIME::Base64;
 
+our $RKN_DUMP_VERSION = "2.3";
 my $VERSION='0.01';
 
 sub new
@@ -49,7 +50,7 @@ sub sendRequest
 	return $this->{service}->sendRequest(
 		$xmlreq,
 		$xmlreqsig,
-		"2.2"
+		$RKN_DUMP_VERSION
 	);
 }
 
