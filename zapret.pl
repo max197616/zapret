@@ -220,11 +220,11 @@ eval
 		my $files = getDumpFile(getResult($lastCode));
 		getAllContent();
 		parseFiles($files);
-		parseOurBlacklist($our_blacklist);
+		parseOurBlacklist($our_blacklist) if($our_blacklist);
 		analyzeOldContent();
 		$register_processed = 1;
 	} else {
-		parseOurBlacklist($our_blacklist);
+		parseOurBlacklist($our_blacklist) if($our_blacklist);
 	}
 };
 if($@)
