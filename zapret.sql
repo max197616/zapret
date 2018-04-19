@@ -1,6 +1,6 @@
 -- MySQL dump 10.13  Distrib 5.1.73, for redhat-linux-gnu (x86_64)
 --
--- Host: localhost    Database: rkn
+-- Host: localhost    Database: rkn1
 -- ------------------------------------------------------
 -- Server version	5.1.73
 
@@ -26,10 +26,11 @@ CREATE TABLE `zap2_domains` (
   `id` int(6) unsigned NOT NULL AUTO_INCREMENT,
   `date_add` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `record_id` int(6) unsigned NOT NULL,
-  `domain` varchar(255) NOT NULL,
+  `domain` varchar(255) DEFAULT NULL,
   `domain_fixed` varchar(60) NOT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+  PRIMARY KEY (`id`),
+  KEY `record_id_idx` (`record_id`)
+) ENGINE=MyISAM AUTO_INCREMENT=68562 DEFAULT CHARSET=utf8;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -92,7 +93,7 @@ CREATE TABLE `zap2_ips` (
   `domain` varchar(255) NOT NULL,
   PRIMARY KEY (`id`),
   KEY `record_id` (`record_id`)
-) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+) ENGINE=MyISAM AUTO_INCREMENT=258743 DEFAULT CHARSET=utf8;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -107,8 +108,9 @@ CREATE TABLE `zap2_only_ips` (
   `record_id` int(6) unsigned NOT NULL,
   `date_add` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `ip` varbinary(16) DEFAULT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+  PRIMARY KEY (`id`),
+  KEY `record_id_idx` (`record_id`)
+) ENGINE=MyISAM AUTO_INCREMENT=2658 DEFAULT CHARSET=utf8;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -127,9 +129,10 @@ CREATE TABLE `zap2_records` (
   `decision_org` varchar(50) DEFAULT NULL,
   `include_time` varchar(50) DEFAULT NULL,
   `entry_type` int(3) unsigned DEFAULT NULL,
+  `hash` varchar(60) DEFAULT NULL,
   KEY `id` (`id`),
   KEY `decision_id` (`decision_id`)
-) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+) ENGINE=MyISAM AUTO_INCREMENT=124082 DEFAULT CHARSET=utf8;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -142,17 +145,9 @@ DROP TABLE IF EXISTS `zap2_settings`;
 CREATE TABLE `zap2_settings` (
   `param` varchar(255) NOT NULL,
   `value` longtext NOT NULL,
-  KEY `param` (`param`)
+  UNIQUE KEY `param` (`param`)
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
-INSERT INTO `zap2_settings` (`param`, `value`) VALUES
-('lastDumpDate', '1406930960'),
-('lastAction', 'getResult'),
-('lastResult', 'got'),
-('lastCode', '25ff77c0d152d7544ba2f72a95cbff50'),
-('lastActionDate', '1406929097'),
-('lastDump', '<?xml version="1.0" encoding="windows-1251"?>\r\n<reg:register updateTime="2014-02-02T12:00:00+04:00" updateTimeUrgently="2014-02-01T11:00:00" xmlns:reg="http://rsoc.ru" xmlns:tns="http://rsoc.ru">\r\n<content id="1101" includeTime="2013-12-01T10:00:05">\r\n        <decision date="2013-12-01" number="9" org="');
 
 --
 -- Table structure for table `zap2_subnets`
@@ -166,8 +161,9 @@ CREATE TABLE `zap2_subnets` (
   `date_add` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `record_id` int(6) unsigned NOT NULL,
   `subnet` varchar(30) NOT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+  PRIMARY KEY (`id`),
+  KEY `record_id_idx` (`record_id`)
+) ENGINE=MyISAM AUTO_INCREMENT=68 DEFAULT CHARSET=utf8;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -183,8 +179,9 @@ CREATE TABLE `zap2_urls` (
   `record_id` int(6) unsigned NOT NULL,
   `url` text NOT NULL,
   `url_fixed` text NOT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+  PRIMARY KEY (`id`),
+  KEY `record_id_idx` (`record_id`)
+) ENGINE=MyISAM AUTO_INCREMENT=59268 DEFAULT CHARSET=utf8;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
@@ -196,4 +193,4 @@ CREATE TABLE `zap2_urls` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2015-11-30 10:59:07
+-- Dump completed on 2018-04-19 15:22:24
