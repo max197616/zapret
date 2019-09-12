@@ -1490,7 +1490,8 @@ sub formRequest
 	print REQ $new;
 	close REQ;
 	
-	`$openssl_bin_path/openssl smime -sign -in $req_file -out $sig_file -binary -signer $dir/cert.pem -outform DER`;
+	#Необходимо для подписи по ГОСТ2012, иначе будет ошибка проверки сертификата. openssl 1.1.1 stable + engine
+	`LD_LIBRARY_PATH=/usr/local/gost-ssl/lib $openssl_bin_path/openssl smime -sign -binary -noattr -in $req_file -out $sig_file -signer $dir/cert.pem -outform DER`;
 }
 
 sub sendRequest
