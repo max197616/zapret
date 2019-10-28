@@ -56,7 +56,7 @@ use constant
 
 ######## Config #########
 
-my $openssl_bin_path="/usr/local/gost-ssl/bin";
+my $openssl_bin_path="/usr/local/gost-ssl-new/bin";
 
 my $dir = File::Basename::dirname($0);
 my $Config = {};
@@ -225,6 +225,7 @@ eval
 		parseOurBlacklist($our_blacklist) if($our_blacklist);
 		analyzeOldContent();
 		$register_processed = 1;
+		setParam('lastActionDate', time);
 	} else {
 		parseOurBlacklist($our_blacklist) if($our_blacklist);
 	}
@@ -730,6 +731,26 @@ sub checkData
 {
 	my $c_array = shift;
 	my $db_array = shift;
+	my %c_array = map { $_ => 1 } @$c_array;
+	my @add_entries;
+
+	foreach my $entry (@$db_array)
+	{
+		if(exists $c_array{$entry->{value}})
+		{
+			delete $entry->{id};
+			delete $c_array{$entry->{value}};
+		}
+	}
+	@add_entries = keys %c_array;
+	return @add_entries;
+}
+
+=pod
+sub checkData
+{
+	my $c_array = shift;
+	my $db_array = shift;
 	my @add_entries;
 	foreach my $val (@{$c_array})
 	{
@@ -750,6 +771,7 @@ sub checkData
 	}
 	return @add_entries;
 }
+=cut
 
 sub insertEntry
 {
@@ -1311,6 +1333,11 @@ sub parseOurBlacklist
 			my $ip = $url;
 			$ip =~ s/^ipv6\:\/\///;
 			push(@{$content{ipv6}{value}}, $ip);
+		} elsif ($url =~ /^subnet\:\/\//)
+		{
+			my $subnet = $url;
+			$subnet =~ s/^subnet\:\/\///;
+			push(@{$content{ipSubnet}{value}}, $subnet);
 		} else {
 			if($url =~ /^\*\./ || $url !~ /\//)
 			{
@@ -1508,7 +1535,6 @@ sub sendRequest
 	$lastCode = $res->{code};
 	setParam('lastCode', $lastCode);
 	setParam('lastAction', 'sendRequest');
-	setParam('lastActionDate', time);
 	setParam('lastResult', 'send');
 }
 
