@@ -1094,6 +1094,10 @@ sub processContent
 		{
 			processOnlyIP($content, $db_content);
 		}
+		if(defined $content->{ipSubnet}{value} || defined $content->{ipv6Subnet}{value})
+		{
+			processSubnet($content, $db_content);
+		}
 	} else {
 		if($content->{blockType} eq "domain" || $content->{blockType} eq "domain-mask")
 		{
